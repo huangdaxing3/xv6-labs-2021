@@ -141,6 +141,8 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->mask = 0;
+
   return p;
 }
 
@@ -302,6 +304,8 @@ fork(void)
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
+
+  np->mask = p->mask;   // 子进程继承父进程的 mask
 
   pid = np->pid;
 
@@ -653,4 +657,13 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int numproc(void)
+{
+  int i, count = 0;
+  for (i = 0; i < NPROC; i++) {
+    if (proc[i].state != UNUSED) count++;
+  }
+  return count;
 }
