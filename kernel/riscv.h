@@ -335,9 +335,15 @@ sfence_vma()
 #define PGSIZE 4096 // bytes per page
 #define PGSHIFT 12  // bits of offset within a page
 
-#define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
+#define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))  // 对齐地址
 #define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
 
+/*
+PTE_V指示PTE是否存在/有效。如果不存在，尝试引用该页时就会引发一个缺页错误异常。
+PTE_R指示这一页物理帧是否能被读。
+PTE_W指示这一页物理帧是否能被写。
+PTE_X指示这一页物理帧是否能被CPU看待并转换成指令来执行。
+PTE_U指示这一页物理帧在用户模式下是否能访问。如果没有置位，则该一页物理帧只能在监管者模式下被访问。*/
 #define PTE_V (1L << 0) // valid
 #define PTE_R (1L << 1)
 #define PTE_W (1L << 2)
