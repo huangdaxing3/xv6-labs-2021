@@ -5,7 +5,6 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-#include "vm.c"
 
 struct cpu cpus[NCPU];
 
@@ -53,7 +52,7 @@ procinit(void)
   initlock(&wait_lock, "wait_lock");
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
-      // p->kstack = KSTACK((int) (p - proc));
+      p->kstack = KSTACK((int) (p - proc));
   }
 }
 
@@ -129,9 +128,9 @@ found:
   }
 
   if ((p->usyspage = (struct usyscall*)kalloc()) == 0) {
-  freeproc(p);
-  release(&p->lock);
-  return 0;
+    freeproc(p);
+    release(&p->lock);
+    return 0;
   }
   p->usyspage->pid = p->pid;
 
@@ -142,12 +141,6 @@ found:
     release(&p->lock);
     return 0;
   }
-
-  p->kpgtbl = kvminit_pgtbl();
-  char *pa = kalloc();
-  uint64 va = KSTACK((int)0);
-  kvmmap(p, va, pa, PGSIZE, PTE_W | PTE_R);
-  p->kstack = va;
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -180,13 +173,6 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
-
-  void *kstack_pa = (void *)kvmpa(p->kpgtbl, p->kstack);
-  kfree(kstack_pa);
-  p->kstack = 0;
-  free_kpgtbl(p->kpgtbl);
-  p->kpgtbl = 0;
-
   p->state = UNUSED;
 }
 
@@ -486,13 +472,7 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
-
-        w_satp(MAKE_SATP(p->kpgtbl));
-        sfence_vma();
-
         swtch(&c->context, &p->context);
-
-        kvminithart();
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.

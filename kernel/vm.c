@@ -49,39 +49,6 @@ kvmmake(void)
   return kpgtbl;
 }
 
-void k_pgtbl(pagetable_t pgtbl)
-{
-  // uart registers
-  kvmmap(pgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W);
-
-  // virtio mmio disk interface
-  kvmmap(pgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
-
-  // PLIC
-  kvmmap(pgtbl, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
-
-  // map kernel text executable and read-only.
-  kvmmap(pgtbl, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
-
-  // map kernel data and the physical RAM we'll make use of.
-  kvmmap(pgtbl, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
-
-  // map the trampoline for trap entry/exit to
-  // the highest virtual address in the kernel.
-  kvmmap(pgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
-}
-
-void
-kvminit_pgtbl(void)
-{
-  pagetable_t pgtbl;
-  pgtbl = (pagetable_t) kalloc();
-  memset(pgtbl, 0, PGSIZE);
-  
-  k_pgtbl(pgtbl);
-  return pgtbl;
-}
-
 // Initialize the one kernel_pagetable
 void
 kvminit(void)
@@ -110,39 +77,24 @@ kvminithart()
 //   21..29 -- 9 bits of level-1 index.
 //   12..20 -- 9 bits of level-0 index.
 //    0..11 -- 12 bits of byte offset within the page.
-// walk为给定的虚拟地址，找到其相应的PTE，如果PTE不存在则新分配一页使之有效
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
   if(va >= MAXVA)
     panic("walk");
 
-  for(int level = 2; level > 0; level--){
+  for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
-    // 根据当前level，对va进行移位和掩码操作，得到当前level页表中的对应PTE条目
-    // level=2时，向右移出12+2*9=30位，经掩码后得到9位level=2页表的PTE编号
-    // level=1时，向右移出12+9=21位，经掩码后得到9位level=1页表的PTE编号
     if(*pte & PTE_V) {
-      // 判断有效位
       pagetable = (pagetable_t)PTE2PA(*pte);
-      // 提取物理地址，对应一个页的首地址
-      // 将最右10位标志位移出，补充12位全0的偏移位，原44位PPN保留，得到指向下一层页表的物理地址
-      // level=2时，pagetable指向level=1的页表
-      // level=1时，pagetable指向level=0的页表
     } else {
-       // 对应PTE不存在，且alloc被置位，则为该PTE指向的下一层页表分配一页
       if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
         return 0;
-      // 一切清0，新分配的下一级页表的所有PTE也都是无效的
       memset(pagetable, 0, PGSIZE);
-      // 更新PTE，将56位物理地址右移12位去掉偏移位，移进10位标志位，同时将PTE_V置1
       *pte = PA2PTE(pagetable) | PTE_V;
     }
   }
-  // 跳出while后，此时pagetable指向level=0的页表
   return &pagetable[PX(0, va)];
-  // level=0，向右移出12位，经掩码后得到9位level=0页表的PTE编号
-  // 返回va对应的level=0页表中的对应PTE
 }
 
 // Look up a virtual address, return the physical address,
@@ -171,7 +123,6 @@ walkaddr(pagetable_t pagetable, uint64 va)
 // add a mapping to the kernel page table.
 // only used when booting.
 // does not flush TLB or enable paging.
-// 将某个逻辑地址映射到某个物理地址（添加第一个参数 pgtbl）
 void
 kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 {
@@ -183,13 +134,6 @@ kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 // physical addresses starting at pa. va and size might not
 // be page-aligned. Returns 0 on success, -1 if walk() couldn't
 // allocate a needed page-table page.
-// mappages为给定输入的映射建立PTE，更新页表
-/*
-它的输入是一个页表、要建立映射关系的va和pa、映射的范围大小、以及PTE的权限。
-mappages以页为单位处理这些输入，调用walk为va查找最后一级页表的PTE，如果该PTE没有被占用
-（输入新的映射时，walk会返回有效位为0的PTE，代表没有人在使用这项映射），
-就用输入的pa和PTE权限，更新该PTE项并设置其有效，从而在页表中建立起新映射，
-反复进行直到输入的所有映射关系都被建立完成。*/
 int
 mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 {
@@ -201,23 +145,16 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
-  // 为va的起始和终止地址分别向下向上取页大小4096的整
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
-      // walk为虚拟地址a分配PTE失败
       return -1;
     if(*pte & PTE_V)
-      // 该PTE已经被别的va映射，有效位有效
       panic("mappages: remap");
-    // 将物理地址pa的PPN提取出来，加上标志位信息perm和有效位
-    // 然后将该条目放到PTE中
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
-      // 分到了足够页数就返回
       break;
     a += PGSIZE;
     pa += PGSIZE;
-    // 已经分配了一页，虚拟地址的起始位置和物理地址起始位置都加一页
   }
   return 0;
 }
@@ -342,22 +279,6 @@ freewalk(pagetable_t pagetable)
     }
   }
   kfree((void*)pagetable);
-}
-
-void
-free_kpgtbl(pagetable_t pagetable)
-{
-  // there are 2^9 = 512 PTEs in a page table.
-  for(int i = 0; i < 512; i++){
-    pte_t pte = pagetable[i];
-    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){ // 如果该页表项指向更低一级的页表
-      // 递归释放低一级页表及其页表项
-      uint64 child = PTE2PA(pte);
-      free_kpgtbl((pagetable_t)child);
-      pagetable[i] = 0;
-    }
-  }
-  kfree((void*)pagetable); // 释放当前级别页表所占用空间
 }
 
 // Free user memory pages,

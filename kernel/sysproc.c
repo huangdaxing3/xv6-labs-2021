@@ -107,11 +107,3 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
-
-uint64
-sys_pgaccess(void)
-{
-  int pg;
-  if(argint(0, &pg) < 0)
-    return -1;
-}
