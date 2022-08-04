@@ -77,8 +77,17 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
+    if (p->interval){   // 如果设定了时钟事件
+      if (p->interval == p->ticks){  // 如果到了时钟倒计时
+        // p->ticks = 0; 
+        *p->pretrapf = *p->trapframe;
+        p->trapframe->epc = p->handler;
+      }
+      p->ticks++;
+    }
     yield();
+  }
 
   usertrapret();
 }
