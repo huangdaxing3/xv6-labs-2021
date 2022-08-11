@@ -9,6 +9,8 @@
 #include "riscv.h"
 #include "defs.h"
 
+uint count[PHYSTOP / PGSIZE + 1];
+
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -24,6 +26,15 @@ struct {
 } kmem;
 
 void
+p_count(uint64 pa)
+{
+  int tmp = pa / PGSIZE;
+  acquire(&kmem.lock);
+  count[tmp]++;
+  release(&kmem.lock);
+}
+
+void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
@@ -35,8 +46,10 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE){
+    count[(uint64)p / PGSIZE] = 1;
     kfree(p);
+  }
 }
 
 // Free the page of physical memory pointed at by v,
@@ -46,6 +59,14 @@ freerange(void *pa_start, void *pa_end)
 void
 kfree(void *pa)
 {
+  acquire(&kmem.lock);
+  int tmp = (uint64)pa / PGSIZE;
+  count[tmp]--;
+  if (count[tmp] > 0){
+    release(&kmem.lock);
+    return;
+  }
+  release(&kmem.lock);
   struct run *r;
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
@@ -72,11 +93,40 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+    count[(uint64)r / PGSIZE] = 1;
+  }
   release(&kmem.lock);
 
-  if(r)
+  if(r){
     memset((char*)r, 5, PGSIZE); // fill with junk
+  }
   return (void*)r;
+}
+
+int
+check_cowpage(pagetable_t pagetable, uint64 va)
+{
+  if (va >= MAXVA) return -1;
+  pte_t *pte = walk(pagetable, va, 0);
+  uint64 pa;
+  if (pte == 0 || !(*pte & PTE_COW)) {
+    printf("not cowpage\n");
+    return -1;
+  }
+  pa = PTE2PA(*pte);
+  if (count[pa / PGSIZE] >= 2){
+    count[pa/PGSIZE]--;
+    char *mem = kalloc();
+    if(mem == 0) return -1;
+    memmove(mem, (char *)pa, PGSIZE);
+    uint flag = PTE_FLAGS(*pte) | PTE_W;
+    flag ^= PTE_COW;
+    (*pte) = PA2PTE((uint64)mem) | flag;
+  } else {
+    (*pte) |= PTE_W;
+    (*pte) ^= PTE_COW;
+  }
+  return 0;
 }
