@@ -115,18 +115,24 @@ check_cowpage(pagetable_t pagetable, uint64 va)
     printf("not cowpage\n");
     return -1;
   }
+  if ((*pte & PTE_U) == 0 || (*pte & PTE_V) == 0) return -1;
   pa = PTE2PA(*pte);
-  if (count[pa / PGSIZE] >= 2){
-    count[pa/PGSIZE]--;
-    char *mem = kalloc();
-    if(mem == 0) return -1;
-    memmove(mem, (char *)pa, PGSIZE);
-    uint flag = PTE_FLAGS(*pte) | PTE_W;
-    flag ^= PTE_COW;
-    (*pte) = PA2PTE((uint64)mem) | flag;
-  } else {
-    (*pte) |= PTE_W;
-    (*pte) ^= PTE_COW;
-  }
+  // if (count[pa / PGSIZE] >= 2){
+  //   count[pa/PGSIZE]--;
+  //   uint64 mem = (uint64)kalloc();
+  //   if(mem == 0) return -1;
+  //   memmove((void *)mem, (void *)pa, PGSIZE);
+  //   uint flag = PTE_FLAGS(*pte) | PTE_W;
+  //   flag ^= PTE_COW;
+  //   (*pte) = PA2PTE((uint64)mem) | flag;
+  // } else {
+  //   (*pte) |= PTE_W;
+  //   (*pte) ^= PTE_COW;
+  // }
+  uint64 mem = (uint64)kalloc();
+  if (mem == 0) return -1;
+  memmove((void *)mem, (void *)pa, PGSIZE);
+  kfree((void *)pa);
+  *pte = PA2PTE(mem) | PTE_V | PTE_U | PTE_R | PTE_W | PTE_X;
   return 0;
 }
