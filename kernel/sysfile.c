@@ -484,3 +484,38 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_mmap(void)
+{
+  uint64 addr;
+  struct file *file;
+  struct proc *p = myproc();
+  int length, prot, flags, fd, offset;
+  if(argaddr(0, &addr) || argint(1, &length) || argint(2, &prot) || argint(3, &flags) || argfd(4, &fd, &file) || argint(5, &offset)){
+    return -1;
+  }
+  length = PGROUNDUP(length);
+  for(int i = 0; i < 16; i++) {
+    if(p->vmas[i].valid == 0) {
+      p->vmas[i].valid = 1;
+      p->vmas[i].addr = p->sz;
+      p->vmas[i].length = length;
+      p->vmas[i].prot = prot;
+      p->vmas[i].flags = flags;
+      p->vmas[i].fd = fd;
+      p->vmas[i].file = file;
+      p->vmas[i].offset = offset;
+      filedup(file);
+      p->sz += length;
+      return p->vmas[i].addr;
+    }
+  }
+  return -1;
+}
+
+uint64
+sys_munmap(void)
+{
+  return -1;
+}
