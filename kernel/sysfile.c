@@ -536,7 +536,7 @@ sys_munmap(void)
     vma->length -= len;
     if (vma->flags & MAP_SHARED) filewrite(vma->f, addr, len);
     uvmunmap(p->pagetable, addr, len/PGSIZE, 1);
-    if (vma->length <= 0) {
+    if (vma->length == 0) {
       fileclose(vma->f);
       vma->valid = 0;
     }
